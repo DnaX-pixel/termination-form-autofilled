@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "termination-form-app",
+      "runtimeExecutable": "php",
+      "runtimeArgs": ["-S", "localhost:8811", "-t", "public"],
+      "port": 8811
+    }
+  ]
+}
