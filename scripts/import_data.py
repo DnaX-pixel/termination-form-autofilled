@@ -1,7 +1,12 @@
 """
-One-time (re-runnable) import: extract the 6 columns needed by the
+One-time (re-runnable) import: extract the columns needed by the
 termination form from the 'output' sheet of SERVICE LEVEL xlsx into a
-compact JSON lookup file keyed by Service Number (primary key).
+compact JSON lookup file keyed by Account Number (primary key).
+
+One account can have multiple Service Numbers, each with its own
+installation address; account_name/ic_br_no/tm_segment_code are
+account-level (verified consistent across all services of an account
+in the source data) and stored once per account.
 
 Usage:
     python scripts/import_data.py "SERVICE LEVEL 26062026.xlsx"
@@ -41,19 +46,11 @@ def main():
         "TM Segment Code",
         "SVC Installation Address",
     ]
-    key_map = {
-        "Service Number": "service_number",
-        "Account No": "account_no",
-        "Account Name": "account_name",
-        "IC / BR No": "ic_br_no",
-        "TM Segment Code": "tm_segment_code",
-        "SVC Installation Address": "svc_installation_address",
-    }
 
     idx = {}
-    result = {}
-    duplicates = 0
-    total = 0
+    accounts = {}
+    total_rows = 0
+    duplicate_services = 0
 
     for i, row in enumerate(ws.iter_rows(values_only=True)):
         if i == 0:
@@ -62,28 +59,42 @@ def main():
                 idx[name] = header.index(name)
             continue
 
-        sn = clean(row[idx["Service Number"]])
-        if not sn:
+        account_no = clean(row[idx["Account No"]])
+        service_number = clean(row[idx["Service Number"]])
+        if not account_no or not service_number:
             continue
 
-        total += 1
-        if sn in result:
-            duplicates += 1
+        total_rows += 1
 
-        result[sn] = {
-            key_map[name]: clean(row[idx[name]])
-            for name in needed
-            if name != "Service Number"
+        account = accounts.setdefault(account_no, {
+            "account_name": clean(row[idx["Account Name"]]),
+            "ic_br_no": clean(row[idx["IC / BR No"]]),
+            "tm_segment_code": clean(row[idx["TM Segment Code"]]),
+            "services": {},
+        })
+
+        if service_number in account["services"]:
+            duplicate_services += 1
+
+        account["services"][service_number] = {
+            "service_number": service_number,
+            "svc_installation_address": clean(row[idx["SVC Installation Address"]]),
         }
+
+    # Flatten services dict -> list, in first-seen order
+    for account in accounts.values():
+        account["services"] = list(account["services"].values())
 
     out_path = os.path.join(SCRIPT_DIR, "..", "data", "raw_data.json")
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(result, f, ensure_ascii=False)
+        json.dump(accounts, f, ensure_ascii=False)
 
-    print(f"Rows scanned: {total}")
-    print(f"Unique service numbers: {len(result)}")
-    print(f"Duplicate service numbers (overwritten by last occurrence): {duplicates}")
+    total_services = sum(len(a["services"]) for a in accounts.values())
+    print(f"Rows scanned: {total_rows}")
+    print(f"Unique accounts: {len(accounts)}")
+    print(f"Unique service numbers: {total_services}")
+    print(f"Duplicate (account, service_number) rows overwritten by last occurrence: {duplicate_services}")
     print(f"Written to: {out_path}")
 
 

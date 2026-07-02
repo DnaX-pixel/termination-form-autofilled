@@ -20,9 +20,14 @@ class DocxExporter
      * Fill the template with the given fields and return the path to the
      * generated .docx file.
      *
-     * @param array<string,string> $fields placeholder name => value (without ${})
+     * @param array<string,string> $fields placeholder name => value (without ${}).
+     *        If $services is non-empty, 'account_no' is written once (on the
+     *        first cloned row) rather than repeated on every row.
+     * @param array<int,array{service_number:string}> $services
+     *        one or more service numbers under the account; the Service Number
+     *        table row (No/Service Number) is cloned once per entry, in order.
      */
-    public function generate(array $fields): string
+    public function generate(array $fields, array $services = []): string
     {
         $docxPath = $this->storageDir . '/' . uniqid('termination_', true) . '.docx';
         if (!copy($this->templatePath, $docxPath)) {
@@ -39,6 +44,15 @@ class DocxExporter
             throw new RuntimeException('word/document.xml not found in template');
         }
 
+        if (!empty($services)) {
+            $xml = $this->fillServiceRows($xml, $services);
+        }
+
+        if (isset($fields['account_no'])) {
+            $xml = $this->fillAccountNumberOnce($xml, (string) $fields['account_no']);
+            unset($fields['account_no']);
+        }
+
         foreach ($fields as $name => $value) {
             $xml = $this->replacePlaceholder($xml, $name, (string) $value);
         }
@@ -50,6 +64,65 @@ class DocxExporter
         $zip->close();
 
         return $docxPath;
+    }
+
+    /**
+     * Clones the Service Number table row (containing ${row_no} and
+     * ${service_number}) once per entry in $services, in document order.
+     * The shared ${account_no} placeholder in each clone is left untouched
+     * here; fillAccountNumberOnce() fills only the first occurrence.
+     *
+     * @param array<int,array{service_number:string}> $services
+     */
+    private function fillServiceRows(string $xml, array $services): string
+    {
+        $pattern = '/<w:tr\b(?:(?!<\/w:tr>).)*?\$\{row_no\}(?:(?!<\/w:tr>).)*?'
+            . '\$\{service_number\}(?:(?!<\/w:tr>).)*?\$\{account_no\}(?:(?!<\/w:tr>).)*?<\/w:tr>/su';
+
+        if (!preg_match($pattern, $xml, $m)) {
+            throw new RuntimeException('Service row template (row_no/service_number/account_no) not found');
+        }
+        $rowTemplate = $m[0];
+
+        $rows = '';
+        $i = 1;
+        foreach ($services as $service) {
+            $row = $rowTemplate;
+            $row = $this->replaceInFragment($row, 'row_no', (string) $i);
+            $row = $this->replaceInFragment($row, 'service_number', (string) $service['service_number']);
+            $rows .= $row;
+            $i++;
+        }
+
+        return str_replace($rowTemplate, $rows, $xml);
+    }
+
+    /**
+     * Fills only the FIRST ${account_no} occurrence with $value; any
+     * further occurrences (extra cloned rows) are blanked out, so the
+     * account number is written once even though the row was duplicated.
+     */
+    private function fillAccountNumberOnce(string $xml, string $value): string
+    {
+        $literal = '${account_no}';
+        $charsPattern = $this->buildFlexiblePattern($literal);
+        $pattern = '/(<w:r\b[^>]*>(?:<w:rPr>(?:(?!<\/w:rPr>).)*?<\/w:rPr>)?)'
+            . '<w:t\b[^>]*>([^<]*?)' . $charsPattern . '([^<]*?)<\/w:t><\/w:r>/su';
+
+        $escapedValue = htmlspecialchars($value, ENT_XML1 | ENT_QUOTES, 'UTF-8');
+        $seen = 0;
+
+        $result = preg_replace_callback($pattern, function ($m) use ($escapedValue, &$seen) {
+            $seen++;
+            $text = $seen === 1 ? $escapedValue : '';
+            return $m[1] . '<w:t xml:space="preserve">' . $m[2] . $text . $m[3] . '</w:t></w:r>';
+        }, $xml, -1, $count);
+
+        if ($count === 0) {
+            throw new RuntimeException('Placeholder ${account_no} not found in template');
+        }
+
+        return $result;
     }
 
     public function toPdf(string $docxPath): string
@@ -76,8 +149,23 @@ class DocxExporter
      * Replace ${name} with $value inside word/document.xml, tolerating
      * Word splitting the placeholder text across multiple adjacent <w:t>
      * runs (which happens unpredictably after any edit to the document).
+     * Replaces every occurrence (e.g. ${date_generated} appears twice).
      */
     private function replacePlaceholder(string $xml, string $name, string $value): string
+    {
+        return $this->substitutePlaceholder($xml, $name, $value, -1);
+    }
+
+    /**
+     * Same as replacePlaceholder(), but for a standalone XML fragment (e.g.
+     * a single cloned table row) where exactly one occurrence is expected.
+     */
+    private function replaceInFragment(string $xml, string $name, string $value): string
+    {
+        return $this->substitutePlaceholder($xml, $name, $value, 1);
+    }
+
+    private function substitutePlaceholder(string $xml, string $name, string $value, int $limit): string
     {
         $literal = '${' . $name . '}';
         $charsPattern = $this->buildFlexiblePattern($literal);
@@ -93,7 +181,7 @@ class DocxExporter
 
         $result = preg_replace_callback($pattern, function ($m) use ($escapedValue) {
             return $m[1] . '<w:t xml:space="preserve">' . $m[2] . $escapedValue . $m[3] . '</w:t></w:r>';
-        }, $xml, -1, $count);
+        }, $xml, $limit, $count);
 
         if ($count === 0) {
             throw new RuntimeException("Placeholder \${$name} not found in template");

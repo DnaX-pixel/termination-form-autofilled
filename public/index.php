@@ -23,7 +23,7 @@
     padding: 40px 20px;
   }
   .card {
-    max-width: 640px;
+    max-width: 760px;
     margin: 0 auto;
     background: #fff;
     border: 1px solid var(--line);
@@ -68,7 +68,7 @@
     background: #fafbfc;
     color: #40474f;
   }
-  #service_number { font-weight: 600; letter-spacing: 0.02em; }
+  #account_no { font-weight: 600; letter-spacing: 0.02em; }
   .status {
     font-size: 13px;
     margin: -8px 0 20px;
@@ -77,6 +77,58 @@
   .status.ok { color: var(--ok); }
   .status.err { color: var(--err); }
   .status.pending { color: var(--muted); }
+  .section-title {
+    font-size: 13px;
+    font-weight: 700;
+    margin: 28px 0 12px;
+    border-top: 1px solid var(--line);
+    padding-top: 20px;
+  }
+  .service-row {
+    display: grid;
+    grid-template-columns: 160px 1fr 32px;
+    gap: 8px;
+    align-items: start;
+    margin-bottom: 8px;
+  }
+  .service-row input {
+    padding: 8px 10px;
+    font-size: 13.5px;
+  }
+  .service-row .remove-btn {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    color: var(--err);
+    cursor: pointer;
+    height: 36px;
+    font-size: 16px;
+    line-height: 1;
+  }
+  .service-header {
+    display: grid;
+    grid-template-columns: 160px 1fr 32px;
+    gap: 8px;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin-bottom: 8px;
+  }
+  .add-row-btn {
+    background: none;
+    border: 1px dashed var(--line);
+    border-radius: 6px;
+    color: var(--accent);
+    font-size: 13px;
+    font-weight: 600;
+    padding: 8px 12px;
+    cursor: pointer;
+    width: 100%;
+    margin-top: 4px;
+  }
+  .add-row-btn:hover { background: #f2f6ff; }
   .actions {
     display: flex;
     gap: 10px;
@@ -84,7 +136,7 @@
     border-top: 1px solid var(--line);
     padding-top: 24px;
   }
-  button {
+  button.primary, button.secondary {
     flex: 1;
     padding: 11px 16px;
     font-size: 14px;
@@ -104,31 +156,23 @@
     color: var(--ink);
   }
   button.secondary:hover { background: #f2f4f6; }
-  button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
 </style>
 </head>
 <body>
   <div class="card">
     <h1>Termination Form Generator</h1>
-    <p class="sub">Enter the Service Number to auto-fill customer details, then generate the termination checklist.</p>
+    <p class="sub">Enter the Account Number to auto-fill customer details and list all related Service Numbers, then generate the termination checklist.</p>
 
     <form id="form" action="generate.php" method="POST">
       <div class="field">
-        <label for="service_number">Service Number (Primary Key)</label>
-        <input type="text" id="service_number" name="service_number" placeholder="e.g. 6089889331" autocomplete="off" required>
+        <label for="account_no">Account Number (Primary Key)</label>
+        <input type="text" id="account_no" name="account_no" placeholder="e.g. 1040974402" autocomplete="off" required>
       </div>
       <div class="status pending" id="status">&nbsp;</div>
 
       <div class="field">
         <label for="customer_name">Customer Name</label>
         <input type="text" id="customer_name" name="customer_name">
-      </div>
-      <div class="field">
-        <label for="account_no">Account Number</label>
-        <input type="text" id="account_no" name="account_no">
       </div>
       <div class="field">
         <label for="tm_segment_code">TM Segment Code</label>
@@ -138,10 +182,15 @@
         <label for="ic_br_no">IC / BR Number</label>
         <input type="text" id="ic_br_no" name="ic_br_no">
       </div>
-      <div class="field">
-        <label for="svc_installation_address">Site / Installation Address</label>
-        <input type="text" id="svc_installation_address" name="svc_installation_address">
+
+      <div class="section-title">Service Numbers</div>
+      <div class="service-header">
+        <span>Service Number</span>
+        <span>Installation Address</span>
+        <span></span>
       </div>
+      <div id="service-rows"></div>
+      <button type="button" class="add-row-btn" id="add-row">+ Add Service Number</button>
 
       <div class="actions">
         <button type="submit" class="primary" name="format" value="pdf">Generate PDF</button>
@@ -151,23 +200,37 @@
   </div>
 
 <script>
-const serviceNumberInput = document.getElementById('service_number');
+const accountNoInput = document.getElementById('account_no');
 const statusEl = document.getElementById('status');
-const autoFields = ['customer_name', 'account_no', 'tm_segment_code', 'ic_br_no', 'svc_installation_address'];
-const keyMap = {
-  customer_name: 'account_name',
-  account_no: 'account_no',
-  tm_segment_code: 'tm_segment_code',
-  ic_br_no: 'ic_br_no',
-  svc_installation_address: 'svc_installation_address',
-};
+const accountFields = ['customer_name', 'tm_segment_code', 'ic_br_no'];
+const rowsContainer = document.getElementById('service-rows');
+
+function addServiceRow(serviceNumber = '', address = '') {
+  const row = document.createElement('div');
+  row.className = 'service-row';
+  row.innerHTML = `
+    <input type="text" name="service_number[]" placeholder="Service Number">
+    <input type="text" name="svc_installation_address[]" placeholder="Installation Address">
+    <button type="button" class="remove-btn" title="Remove">&times;</button>
+  `;
+  row.querySelector('input[name="service_number[]"]').value = serviceNumber;
+  row.querySelector('input[name="svc_installation_address[]"]').value = address;
+  row.querySelector('.remove-btn').addEventListener('click', () => row.remove());
+  rowsContainer.appendChild(row);
+}
+
+function clearServiceRows() {
+  rowsContainer.innerHTML = '';
+}
+
+document.getElementById('add-row').addEventListener('click', () => addServiceRow());
 
 let lookupToken = 0;
 
 async function lookup() {
-  const value = serviceNumberInput.value.trim();
+  const value = accountNoInput.value.trim();
   if (!value) {
-    statusEl.textContent = ' ';
+    statusEl.textContent = ' ';
     statusEl.className = 'status pending';
     return;
   }
@@ -177,19 +240,33 @@ async function lookup() {
   statusEl.className = 'status pending';
 
   try {
-    const res = await fetch('lookup.php?service_number=' + encodeURIComponent(value));
+    const res = await fetch('lookup.php?account_no=' + encodeURIComponent(value));
     const data = await res.json();
     if (token !== lookupToken) return;
 
     if (data.found) {
-      for (const field of autoFields) {
-        document.getElementById(field).value = data[keyMap[field]] || '';
+      document.getElementById('customer_name').value = data.account_name || '';
+      document.getElementById('tm_segment_code').value = data.tm_segment_code || '';
+      document.getElementById('ic_br_no').value = data.ic_br_no || '';
+
+      clearServiceRows();
+      const services = data.services || [];
+      if (services.length > 0) {
+        for (const s of services) {
+          addServiceRow(s.service_number || '', s.svc_installation_address || '');
+        }
+        statusEl.textContent = `Match found — ${services.length} service number(s) auto-filled.`;
+      } else {
+        addServiceRow();
+        statusEl.textContent = 'Account found but no service numbers on file — add manually.';
       }
-      statusEl.textContent = 'Match found — fields auto-filled.';
       statusEl.className = 'status ok';
     } else {
-      statusEl.textContent = data.message || 'Service number not found. Fill in the fields manually.';
+      statusEl.textContent = (data.message || 'Account number not found.') + ' Fill in the fields manually.';
       statusEl.className = 'status err';
+      if (rowsContainer.children.length === 0) {
+        addServiceRow();
+      }
     }
   } catch (e) {
     statusEl.textContent = 'Lookup failed. Fill in the fields manually.';
@@ -197,13 +274,16 @@ async function lookup() {
   }
 }
 
-serviceNumberInput.addEventListener('blur', lookup);
-serviceNumberInput.addEventListener('keydown', (e) => {
+accountNoInput.addEventListener('blur', lookup);
+accountNoInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
     e.preventDefault();
     lookup();
   }
 });
+
+// Start with one empty row so the form is usable before any lookup
+addServiceRow();
 </script>
 </body>
 </html>

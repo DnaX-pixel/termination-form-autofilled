@@ -3,11 +3,11 @@ require __DIR__ . '/../app/Services/DataSync.php';
 
 header('Content-Type: application/json');
 
-$serviceNumber = trim($_GET['service_number'] ?? '');
+$accountNo = trim($_GET['account_no'] ?? '');
 
-if ($serviceNumber === '') {
+if ($accountNo === '') {
     http_response_code(400);
-    echo json_encode(['found' => false, 'message' => 'service_number is required']);
+    echo json_encode(['found' => false, 'message' => 'account_no is required']);
     exit;
 }
 
@@ -26,12 +26,12 @@ try {
 
 $data = json_decode(file_get_contents($jsonPath), true);
 
-$record = $data[$serviceNumber] ?? null;
+$account = $data[$accountNo] ?? null;
 
-if ($record === null) {
+if ($account === null) {
     http_response_code(404);
-    echo json_encode(['found' => false, 'message' => 'Service number not found in raw data.']);
+    echo json_encode(['found' => false, 'message' => 'Account number not found in raw data.']);
     exit;
 }
 
-echo json_encode(['found' => true] + $record);
+echo json_encode(['found' => true] + $account);

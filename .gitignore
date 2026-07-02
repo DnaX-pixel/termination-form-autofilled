@@ -10,3 +10,5 @@ storage/generated/*
 # OS/editor noise
 .DS_Store
 Thumbs.db
+~$*.doc*
+~$*.xls*
